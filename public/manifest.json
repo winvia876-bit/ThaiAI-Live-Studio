@@ -1,0 +1,9 @@
+{
+  "name": "ThaiAI Live Studio",
+  "short_name": "ThaiAI LIVE",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#0b1220",
+  "theme_color": "#101827",
+  "icons": []
+}

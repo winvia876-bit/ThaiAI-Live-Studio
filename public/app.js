@@ -1,0 +1,10 @@
+const $=id=>document.getElementById(id);let timer=null,voices=[];
+function loadVoices(){voices=speechSynthesis.getVoices()}loadVoices();speechSynthesis.onvoiceschanged=loadVoices;
+function say(line){if(!line)return;speechSynthesis.cancel();const u=new SpeechSynthesisUtterance(line);u.lang="th-TH";u.rate=.94;u.pitch=.92;const v=voices.find(x=>x.lang==="th-TH")||voices.find(x=>x.lang.toLowerCase().startsWith("th"));if(v)u.voice=v;u.onstart=()=>$("mouth").classList.add("talk");u.onend=()=>$("mouth").classList.remove("talk");speechSynthesis.speak(u);try{localStorage.setItem("thaiLiveLastLine",line)}catch(e){}}
+async function generate(viewer=""){const r=await fetch("/api/line",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({topic:$("topic").value,tone:$("tone").value,viewer})});const d=await r.json();if(!r.ok)throw Error(d.detail||d.error);$("line").value=d.line;$("status").textContent="พร้อม • "+d.mode;say(d.line)}
+$("speak").onclick=()=>generate().catch(e=>alert(e.message));$("reply").onclick=()=>generate($("viewer").value.trim()).catch(e=>alert(e.message));$("say").onclick=()=>say($("line").value.trim());
+$("stop").onclick=()=>{if(timer)clearInterval(timer);timer=null;speechSynthesis.cancel();$("mouth").classList.remove("talk");$("auto").textContent="เริ่มพูดวนอัตโนมัติ";};
+$("auto").onclick=()=>{if(timer){$("stop").click();return}generate().catch(e=>alert(e.message));timer=setInterval(()=>generate().catch(console.error),40000);$("auto").textContent="กำลังพูดอัตโนมัติ • แตะเพื่อหยุด"};
+$("clear").onclick=async()=>{await fetch("/api/reset",{method:"POST"});$("line").value="";};
+fetch("/api/status").then(r=>r.json()).then(d=>$("status").textContent="พร้อม • "+(d.ai?"เชื่อม AI แล้ว":"โหมดตัวอย่าง")).catch(()=>$("status").textContent="เชื่อมต่อไม่ได้");
+if("serviceWorker" in navigator)window.addEventListener("load",()=>navigator.serviceWorker.register("/sw.js").catch(()=>{}));
