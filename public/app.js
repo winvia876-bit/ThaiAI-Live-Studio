@@ -1,235 +1,409 @@
 
+"use strict";
+
+/* =====================================
+   ThaiAI LIVE STUDIO - COMPLETE APP.JS
+   Thai Male Host: P'Ton
+===================================== */
+
 const $ = id => document.getElementById(id);
 
 let timer = null;
 let voices = [];
 let speaking = false;
+let generating = false;
+let currentUtterance = null;
+let lastLine = "";
 
-const hasSpeech = "speechSynthesis" in window &&
-                  "SpeechSynthesisUtterance" in window;
+/* ---------- STATUS ---------- */
 
 function setStatus(message) {
   const el = $("status");
   if (el) el.textContent = message;
 }
 
+function setMouth(active) {
+  $("mouth")?.classList.toggle("talk", active);
+}
+
+/* ---------- SPEECH SUPPORT ---------- */
+
+const hasSpeech =
+  "speechSynthesis" in window &&
+  "SpeechSynthesisUtterance" in window;
+
 function loadVoices() {
-  if (!hasSpeech) return;
-  voices = speechSynthesis.getVoices() || [];
+  if (!hasSpeech) return [];
+  voices = window.speechSynthesis.getVoices() || [];
+  return voices;
 }
 
 if (hasSpeech) {
   loadVoices();
-  speechSynthesis.onvoiceschanged = loadVoices;
+  window.speechSynthesis.onvoiceschanged = loadVoices;
 }
 
-// สร้างบทพูดสำรอง หากเซิร์ฟเวอร์ AI ยังไม่ตอบ
-function fallbackLine(viewer = "") {
-  if (viewer) {
-    return `สวัสดีครับ ${viewer} ยินดีต้อนรับเข้าสู่ไลฟ์ของพี่ต้นครับ วันนี้มาสนุกด้วยกันนะครับ`;
+/* รอ Android โหลดเสียง */
+
+async function getThaiVoice() {
+  if (!hasSpeech) {
+    throw new Error("เบราว์เซอร์ไม่รองรับระบบเสียง");
   }
 
-  const topic = $("topic")?.value?.trim() || "เรื่องราวในชีวิตประจำวัน";
+  let available = loadVoices();
+
+  if (!available.length) {
+    await new Promise(resolve => {
+      let finished = false;
+
+      const done = () => {
+        if (finished) return;
+        finished = true;
+        clearTimeout(timeout);
+        window.speechSynthesis.removeEventListener(
+          "voiceschanged", done
+        );
+        resolve();
+      };
+
+      const timeout = setTimeout(done, 3000);
+
+      window.speechSynthesis.addEventListener(
+        "voiceschanged", done
+      );
+    });
+
+    available = loadVoices();
+  }
+
+  const thaiVoice = available.find(v =>
+    v.lang?.toLowerCase().replace("_", "-") === "th-th"
+  ) || available.find(v =>
+    v.lang?.toLowerCase().replace("_", "-").startsWith("th-")
+  );
+
+  if (!thaiVoice) {
+    throw new Error(
+      "ไม่พบเสียงภาษาไทย กรุณาติดตั้งเสียงภาษาไทยใน Android แล้วเปิด Chrome ใหม่"
+    );
+  }
+
+  return thaiVoice;
+}
+
+/* ---------- STOP SPEECH ---------- */
+
+function stopSpeech() {
+  if (hasSpeech) {
+    window.speechSynthesis.cancel();
+  }
+
+  currentUtterance = null;
+  speaking = false;
+  setMouth(false);
+}
+
+/* ---------- SPEAK THAI ---------- */
+
+async function say(line) {
+  line = String(line || "").trim();
+
+  if (!line) {
+    setStatus("ไม่มีข้อความให้อ่าน");
+    return false;
+  }
+
+  if (!hasSpeech) {
+    setStatus("อุปกรณ์ไม่รองรับระบบเสียง");
+    return false;
+  }
+
+  try {
+    const thaiVoice = await getThaiVoice();
+
+    stopSpeech();
+
+    // ให้เบราว์เซอร์มีเวลายกเลิกเสียงเดิม
+    await new Promise(resolve => setTimeout(resolve, 100));
+
+    const utterance = new SpeechSynthesisUtterance(line);
+
+    utterance.voice = thaiVoice;
+    utterance.lang = "th-TH";
+    utterance.rate = 0.92;
+    utterance.pitch = 0.95;
+    utterance.volume = 1;
+
+    currentUtterance = utterance;
+
+    utterance.onstart = () => {
+      speaking = true;
+      setMouth(true);
+      setStatus("พี่ต้นกำลังพูดภาษาไทย");
+    };
+
+    utterance.onend = () => {
+      speaking = false;
+      setMouth(false);
+      currentUtterance = null;
+      setStatus("พร้อม • พูดจบแล้ว");
+    };
+
+    utterance.onerror = event => {
+      speaking = false;
+      setMouth(false);
+      currentUtterance = null;
+
+      if (event.error !== "canceled" &&
+          event.error !== "interrupted") {
+        setStatus("ระบบเสียงขัดข้อง: " + event.error);
+      }
+    };
+
+    window.speechSynthesis.speak(utterance);
+
+    try {
+      localStorage.setItem("thaiLiveLastLine", line);
+    } catch (e) {}
+
+    return true;
+
+  } catch (error) {
+    stopSpeech();
+    setStatus(error.message);
+    alert(error.message);
+    return false;
+  }
+}
+
+/* ---------- FALLBACK THAI CONTENT ---------- */
+
+function fallbackLine(viewer = "") {
+  if (viewer) {
+    return `สวัสดีครับคุณ ${viewer} ยินดีต้อนรับเข้าสู่ไลฟ์ของพี่ต้นครับ ขอบคุณที่เข้ามาทักทายกันนะครับ`;
+  }
+
+  const topic =
+    $("topic")?.value?.trim() ||
+    "เรื่องราวในชีวิตประจำวัน";
 
   const lines = [
-    `สวัสดีครับทุกคน วันนี้พี่ต้นจะมาเล่าเรื่อง ${topic} ให้ฟังกันครับ`,
-    "ชีวิตคนเราต้องมีเสียงหัวเราะบ้างนะครับ ยิ้มวันละนิด จิตแจ่มใสครับ",
-    "ใครกำลังดูไลฟ์อยู่ ทักทายกันได้นะครับ พี่ต้นยินดีต้อนรับทุกคนครับ",
-    "วันนี้เหนื่อยกันมาทั้งวันแล้ว พักผ่อนและมาสนุกด้วยกันนะครับ"
+    `สวัสดีครับทุกคน วันนี้พี่ต้นจะมาเล่าเรื่อง ${topic} ให้ทุกคนฟังครับ`,
+    "ยินดีต้อนรับทุกคนเข้าสู่ไลฟ์นะครับ ใครเข้ามาแล้วฝากทักทายกันด้วยครับ",
+    "วันนี้ใครเหนื่อยจากการทำงานบ้างครับ เข้ามาพักผ่อนและหัวเราะด้วยกันนะครับ",
+    "พี่ต้นมีคำถามครับ ระหว่างนอนต่ออีกห้านาทีกับตื่นไปทำงาน ทุกคนเลือกอะไรครับ",
+    "อย่าลืมยิ้มให้ตัวเองทุกวันนะครับ เพราะรอยยิ้มเป็นกำลังใจที่ดีที่สุดครับ",
+    "ขอบคุณทุกคนที่เข้ามารับชมครับ อยู่พูดคุยเป็นเพื่อนกันก่อนนะครับ"
   ];
 
   return lines[Math.floor(Math.random() * lines.length)];
 }
 
-// ระบบเสียงภาษาไทย
-function say(line) {
-  line = String(line || "").trim();
+/* ---------- GENERATE AI LINE ---------- */
 
-  if (!line) {
-    setStatus("ไม่มีข้อความสำหรับอ่าน");
-    return;
-  }
-
-  if (!hasSpeech) {
-    setStatus("เบราว์เซอร์ไม่รองรับระบบเสียง");
-    alert("โทรศัพท์หรือเบราว์เซอร์ไม่รองรับ Text-to-Speech");
-    return;
-  }
-
-  speechSynthesis.cancel();
-  loadVoices();
-
-  const u = new SpeechSynthesisUtterance(line);
-  u.lang = "th-TH";
-  u.rate = 0.94;
-  u.pitch = 0.95;
-  u.volume = 1;
-
-  const thaiVoice = voices.find(v =>
-    v.lang && v.lang.toLowerCase() === "th-th"
-  ) || voices.find(v =>
-    v.lang && v.lang.toLowerCase().startsWith("th")
-  );
-
-  if (thaiVoice) u.voice = thaiVoice;
-
-  u.onstart = () => {
-    speaking = true;
-    $("mouth")?.classList.add("talk");
-    setStatus("กำลังพูดภาษาไทย...");
-  };
-
-  u.onend = () => {
-    speaking = false;
-    $("mouth")?.classList.remove("talk");
-    setStatus("พร้อม • พูดจบแล้ว");
-  };
-
-  u.onerror = event => {
-    speaking = false;
-    $("mouth")?.classList.remove("talk");
-    setStatus("เสียงผิดพลาด: " + event.error);
-  };
-
-  try {
-    speechSynthesis.speak(u);
-    localStorage.setItem("thaiLiveLastLine", line);
-  } catch (e) {
-    setStatus("ไม่สามารถเปิดเสียงได้");
-    alert(e.message);
-  }
-}
-
-// สร้างบทพูดจากเซิร์ฟเวอร์
 async function generate(viewer = "") {
+  if (generating) return;
+
+  generating = true;
   setStatus("กำลังสร้างบทพูด...");
 
-  let line;
-  let mode = "โหมดตัวอย่าง";
-
   try {
-    const response = await fetch("/api/line", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json"
-      },
-      body: JSON.stringify({
-        topic: $("topic")?.value || "",
-        tone: $("tone")?.value || "",
-        viewer
-      })
-    });
+    let line = "";
+    let mode = "โหมดตัวอย่าง";
 
-    const data = await response.json();
+    try {
+      const response = await fetch("/api/line", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          topic: $("topic")?.value || "",
+          tone: $("tone")?.value || "",
+          viewer: viewer
+        })
+      });
 
-    if (!response.ok) {
-      throw new Error(data.detail || data.error || "API Error");
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data.detail || data.error || "API Error");
+      }
+
+      if (typeof data.line !== "string" ||
+          !data.line.trim()) {
+        throw new Error("AI ไม่ได้ส่งบทพูดกลับมา");
+      }
+
+      line = data.line.trim();
+      mode = data.mode || "AI";
+
+    } catch (error) {
+      console.warn("AI API Error:", error);
+
+      line = fallbackLine(viewer);
+      mode = "โหมดตัวอย่าง";
     }
 
-    line = data.line;
-    mode = data.mode || "AI";
-  } catch (error) {
-    console.warn("AI API:", error);
-    line = fallbackLine(viewer);
-    mode = "โหมดตัวอย่าง";
+    lastLine = line;
+
+    const output = $("line");
+
+    if (output) {
+      output.value = line;
+    }
+
+    setStatus("สร้างบทพูดสำเร็จ • " + mode);
+
+    return await say(line);
+
+  } finally {
+    generating = false;
   }
-
-  if (!line) {
-    line = fallbackLine(viewer);
-  }
-
-  $("line").value = line;
-  setStatus("พร้อม • " + mode);
-
-  say(line);
 }
 
-// ปุ่มสร้างบทพูด
-$("speak")?.addEventListener("click", () => {
-  generate().catch(error => {
-    console.error(error);
-    setStatus("เกิดข้อผิดพลาด");
-  });
+/* ---------- GENERATE BUTTON ---------- */
+
+$("speak")?.addEventListener("click", async () => {
+  await generate();
 });
 
-// ปุ่มตอบคอมเมนต์ตัวอย่าง
-$("reply")?.addEventListener("click", () => {
-  generate($("viewer")?.value?.trim() || "");
+/* ---------- REPLY BUTTON ---------- */
+
+$("reply")?.addEventListener("click", async () => {
+  const viewer = $("viewer")?.value?.trim() || "";
+
+  if (!viewer) {
+    setStatus("กรุณาพิมพ์ข้อความตัวอย่างก่อน");
+    alert("กรุณาพิมพ์ข้อความตัวอย่าง เช่น สวัสดีครับพี่ต้น");
+    return;
+  }
+
+  await generate(viewer);
 });
 
-// อ่านข้อความ
-$("say")?.addEventListener("click", () => {
-  say($("line")?.value || "");
+/* ---------- READ TEXT BUTTON ---------- */
+
+$("say")?.addEventListener("click", async () => {
+  const line = $("line")?.value?.trim() || "";
+  await say(line);
 });
 
-// หยุดเสียงทันที
+/* ---------- EMERGENCY STOP ---------- */
+
 $("stop")?.addEventListener("click", () => {
-  if (timer) clearInterval(timer);
+  if (timer) {
+    clearInterval(timer);
+    timer = null;
+  }
 
-  timer = null;
-
-  if (hasSpeech) speechSynthesis.cancel();
-
-  speaking = false;
-  $("mouth")?.classList.remove("talk");
+  stopSpeech();
 
   if ($("auto")) {
     $("auto").textContent = "เริ่มพูดวนอัตโนมัติ";
   }
 
-  setStatus("หยุดการพูดแล้ว");
+  setStatus("หยุดเสียงฉุกเฉินแล้ว");
 });
 
-// พูดวนอัตโนมัติ
-$("auto")?.addEventListener("click", () => {
+/* ---------- AUTO SPEAK ---------- */
+
+$("auto")?.addEventListener("click", async () => {
   if (timer) {
     $("stop")?.click();
     return;
   }
 
-  generate();
+  if (generating) return;
 
-  timer = setInterval(() => {
-    if (!speaking) generate();
+  $("auto").textContent =
+    "กำลังพูดอัตโนมัติ • แตะเพื่อหยุด";
+
+  setStatus("เริ่มระบบพูดอัตโนมัติ");
+
+  await generate();
+
+  timer = setInterval(async () => {
+    if (!speaking && !generating) {
+      await generate();
+    }
   }, 40000);
-
-  $("auto").textContent = "กำลังพูดอัตโนมัติ • แตะเพื่อหยุด";
 });
 
-// ล้างประวัติ
-$("clear")?.addEventListener("click", async () => {
-  $("line").value = "";
+/* ---------- CLEAR HISTORY ---------- */
 
-  try {
-    await fetch("/api/reset", { method: "POST" });
-  } catch (e) {
-    console.warn(e);
+$("clear")?.addEventListener("click", async () => {
+  stopSpeech();
+
+  if ($("line")) {
+    $("line").value = "";
   }
 
-  setStatus("ล้างข้อความแล้ว");
+  lastLine = "";
+
+  try {
+    await fetch("/api/reset", {
+      method: "POST"
+    });
+  } catch (error) {
+    console.warn(error);
+  }
+
+  setStatus("ล้างประวัติเรียบร้อย");
 });
 
-// ตรวจสอบเซิร์ฟเวอร์
+/* ---------- SERVER STATUS ---------- */
+
 async function checkStatus() {
   try {
     const response = await fetch("/api/status");
-    if (!response.ok) throw new Error("Server error");
+
+    if (!response.ok) {
+      throw new Error("Server error");
+    }
 
     const data = await response.json();
 
     setStatus(
-      "พร้อม • " + (data.ai ? "เชื่อม AI แล้ว" : "โหมดตัวอย่าง")
+      "พร้อม • " +
+      (data.ai ? "เชื่อมต่อ AI แล้ว" : "โหมดตัวอย่าง")
     );
-  } catch (e) {
-    setStatus("เซิร์ฟเวอร์ AI ยังไม่ตอบสนอง");
+
+  } catch (error) {
+    setStatus("เซิร์ฟเวอร์ยังไม่ตอบสนอง");
   }
 }
 
-checkStatus();
+/* ---------- INITIALIZATION ---------- */
 
-// ลงทะเบียน Service Worker
+async function initialize() {
+  if (hasSpeech) {
+    loadVoices();
+  }
+
+  await checkStatus();
+
+  try {
+    const saved = localStorage.getItem("thaiLiveLastLine");
+
+    if (saved && $("line") && !$("line").value) {
+      $("line").value = saved;
+    }
+  } catch (error) {}
+
+  console.log("ThaiAI Live Studio initialized");
+}
+
+initialize();
+
+/* ---------- SERVICE WORKER ---------- */
+
 if ("serviceWorker" in navigator) {
   window.addEventListener("load", () => {
-    navigator.serviceWorker.register("/sw.js").catch(console.warn);
+    navigator.serviceWorker
+      .register("/sw.js")
+      .catch(error => console.warn("SW:", error));
   });
 }
+
+/* ---------- END ---------- */
